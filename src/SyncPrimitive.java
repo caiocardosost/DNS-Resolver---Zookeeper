@@ -397,13 +397,14 @@ E só então continue. */
     	
     	/*registra seu serviço e ip no ZNode DNS*/
     	boolean registerService(String servName, String ip) throws KeeperException, InterruptedException {
-    		String pathName;    		
+    		String pathName;
+    		 
     		byte[] data = ip.getBytes(StandardCharsets.UTF_8);
-    		pathName = zk.create(root + "/" + servName, data, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+    		pathName = zk.create(root + "/" + servName, data, Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
             System.out.println("My path name is: "+pathName);
             byte[] data_2 = zk.getData(pathName, false, null);
             System.out.println("My IP is: "+new String(data_2));
-            new Thread().sleep(10000);
+            new Thread().sleep(5000);
             return true;
     	}
     	
@@ -411,18 +412,42 @@ E só então continue. */
     	 * em cada elemento para descobrir se o serviço procurado está registrado e se sim, retorna
     	 * seu ip*/    	
     	String resolverService(String service) throws KeeperException, InterruptedException {
-    		
+    		Stat stat = new Stat();
             List<String> list = zk.getChildren(root, false);
             for(String s : list){
             	if(s.contains(service))  {
             		byte[] data_2 = zk.getData(root +"/"+s, false, null);
-                    String res = new String(data_2);                    
+                    String res = new String(data_2);
+                    zk.exists(root +"/"+s, this);
                     return res;
             		
             	}
             }
             return "Not found!";
     	}
+    	
+    	synchronized public void process(WatchedEvent event) {
+            synchronized (mutex) {
+            try {
+            	String path = event.getPath();
+            	if (event.getType() == Event.EventType.NodeDataChanged) {
+            		byte[] data_2 = zk.getData(path, true, null);
+                    String res = new String(data_2);  
+                    System.out.println("Ip de "+path.substring(5)+" alterado!");
+                    System.out.println("Novo Ip de "+path.substring(5)+":");
+                    System.out.println(res);			
+			    } 
+            	else if(event.getType() == Event.EventType.NodeDeleted) {
+			    	System.out.println("O endereço de Ip de "+path.substring(5)+" não esta mais disponivel!");
+			    	System.out.println("Buscando um novo endereço para "+path.substring(5));
+			    	String newIP = resolverService(path.substring(5));
+			    	System.out.println("Resolucao de "+path.substring(5) +":");
+	                System.out.println(newIP);
+			    }
+			} catch (Exception e) {e.printStackTrace();}
+            	
+            }
+        }
     	
     	
     }
@@ -538,6 +563,8 @@ Chama leave() e espera todos os processos saírem da barreira*/
              System.out.println("Register Service!");
              try{
             	 boolean regis = s.registerService(args[3],args[4]);
+            	 System.out.println("Serviço "+args[3]+" registrado!");
+            	 while(true);
              } catch (KeeperException e){
              	e.printStackTrace();
              } catch (InterruptedException e){
@@ -549,7 +576,8 @@ Chama leave() e espera todos os processos saírem da barreira*/
                  String res = s.resolverService(args[3]);
                  System.out.println("Resolucao de "+args[3] +":");
                  System.out.println(res);
-                 new Thread().sleep(10000);
+                 while(true);
+                 //new Thread().sleep(10000);
                  
              } catch (KeeperException e){
              	e.printStackTrace();

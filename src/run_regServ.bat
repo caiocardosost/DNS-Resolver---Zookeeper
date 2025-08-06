@@ -5,3 +5,5 @@ javac -cp %CP_ZK% *.java
 set WAIT=10000
 @echo Wait time = $WAIT$
 java -cp %CP_ZK% -Dlogback.configurationFile=file:%ZK%\conf\logback.xml SyncPrimitive dns reg localhost pudim.com 192.168.1.1
+
+pause

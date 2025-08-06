@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Random;
 import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
 
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
@@ -29,6 +30,7 @@ public class SyncPrimitive implements Watcher {
 
     static ZooKeeper zk = null;
     static Integer mutex;
+    private static CountDownLatch latch = new CountDownLatch(1);
 
     String root;
 
@@ -398,12 +400,23 @@ E só então continue. */
     	/*registra seu serviço e ip no ZNode DNS*/
     	boolean registerService(String servName, String ip) throws KeeperException, InterruptedException {
     		String pathName;
-    		 
-    		byte[] data = ip.getBytes(StandardCharsets.UTF_8);
-    		pathName = zk.create(root + "/" + servName, data, Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL);
+    		String queuePathName = "/Queue";    		
+    		pathName = zk.create(root + "/" + "Request-", new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
+    		zk.exists(pathName, this);
+    		Stat exist = zk.exists(queuePathName, false);
+    		if (exist == null) {
+    			zk.create(queuePathName, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+    		}
+    		String[] req = {"reg",servName,ip};
+    		//juntando strings de req numa só e usando separados ";"
+    		String reqJoin = String.join(";",req);
+    		//encapsulando reqJoin em bytes armazenar no znode:
+    		byte[] data = reqJoin.getBytes(StandardCharsets.UTF_8);
+    		zk.create(queuePathName+ "/" + "Request-", data, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);    		
             System.out.println("My path name is: "+pathName);
-            byte[] data_2 = zk.getData(pathName, false, null);
-            System.out.println("My IP is: "+new String(data_2));
+            System.out.println("I'm waiting for my request to be processed");
+            latch.await();
+            System.out.println("Is Done!! Closing...");
             new Thread().sleep(5000);
             return true;
     	}
@@ -412,18 +425,39 @@ E só então continue. */
     	 * em cada elemento para descobrir se o serviço procurado está registrado e se sim, retorna
     	 * seu ip*/    	
     	String resolverService(String service) throws KeeperException, InterruptedException {
-    		Stat stat = new Stat();
-            List<String> list = zk.getChildren(root, false);
-            for(String s : list){
-            	if(s.contains(service))  {
-            		byte[] data_2 = zk.getData(root +"/"+s, false, null);
-                    String res = new String(data_2);
-                    zk.exists(root +"/"+s, this);
-                    return res;
-            		
-            	}
-            }
-            return "Not found!";
+    		String pathName;
+    		String queuePathName = "/Queue";    		
+    		pathName = zk.create(root + "/" + "Request-", new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
+    		zk.exists(pathName, this);
+    		Stat exist = zk.exists(queuePathName, false);
+    		if (exist == null) {
+    			zk.create(queuePathName, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+    		}
+    		String[] req = {"res",service};
+    		//juntando strings de req numa só e usando separados ";"
+    		String reqJoin = String.join(";",req);
+    		//encapsulando reqJoin em bytes armazenar no znode:
+    		byte[] data = reqJoin.getBytes(StandardCharsets.UTF_8);
+    		zk.create(queuePathName+ "/" + "Request-", data, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+    		System.out.println("My path name is: "+pathName);
+            System.out.println("I'm waiting for my request to be processed");
+            latch.await();
+            System.out.println("Is Done!! Closing...");
+            byte[] data_2 = zk.getData(pathName, false, null);
+            String res = new String(data_2, StandardCharsets.UTF_8);
+            //new Thread().sleep(5000);
+            return res;
+//            List<String> list = zk.getChildren(root, false);
+//            for(String s : list){
+//            	if(s.contains(service))  {
+//            		byte[] data_2 = zk.getData(root +"/"+s, false, null);
+//                    String res = new String(data_2);
+//                    zk.exists(root +"/"+s, this);
+//                    return res;
+//            		
+//            	}
+//            }
+            //return "Not found!";
     	}
     	
     	synchronized public void process(WatchedEvent event) {
@@ -431,18 +465,20 @@ E só então continue. */
             try {
             	String path = event.getPath();
             	if (event.getType() == Event.EventType.NodeDataChanged) {
-            		byte[] data_2 = zk.getData(path, true, null);
-                    String res = new String(data_2);  
-                    System.out.println("Ip de "+path.substring(5)+" alterado!");
-                    System.out.println("Novo Ip de "+path.substring(5)+":");
-                    System.out.println(res);			
+            		latch.countDown();
+//            		byte[] data_2 = zk.getData(path, true, null);
+//                    String res = new String(data_2);  
+//                    System.out.println("Ip de "+path.substring(5)+" alterado!");
+//                    System.out.println("Novo Ip de "+path.substring(5)+":");
+//                    System.out.println(res);			
 			    } 
             	else if(event.getType() == Event.EventType.NodeDeleted) {
-			    	System.out.println("O endereço de Ip de "+path.substring(5)+" não esta mais disponivel!");
-			    	System.out.println("Buscando um novo endereço para "+path.substring(5));
-			    	String newIP = resolverService(path.substring(5));
-			    	System.out.println("Resolucao de "+path.substring(5) +":");
-	                System.out.println(newIP);
+            		latch.countDown();
+//			    	System.out.println("O endereço de Ip de "+path.substring(5)+" não esta mais disponivel!");
+//			    	System.out.println("Buscando um novo endereço para "+path.substring(5));
+//			    	String newIP = resolverService(path.substring(5));
+//			    	System.out.println("Resolucao de "+path.substring(5) +":");
+//	                System.out.println(newIP);
 			    }
 			} catch (Exception e) {e.printStackTrace();}
             	
@@ -558,7 +594,7 @@ Chama leave() e espera todos os processos saírem da barreira*/
     
     public static void dnsTest(String args[]) {
     	    		
-    	dnsResolver s = new dnsResolver(args[2],"/DNS");
+    	dnsResolver s = new dnsResolver(args[2],"/Response");
     	 if (args[1].equals("reg")) {
              System.out.println("Register Service!");
              try{

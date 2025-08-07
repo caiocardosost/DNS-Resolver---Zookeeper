@@ -373,6 +373,119 @@ E só então continue. */
         }
     }
     
+    static public class Leader extends SyncPrimitive {
+    	
+    	/*construtor - Cria um Znode "/Dns" na raiz caso não exista*/
+    	
+    	Leader(String address, String root){
+    		super(address);
+            this.root = root;
+            
+            if (zk != null) {
+                try {
+                    Stat s = zk.exists(root, false);
+                    if (s == null) {
+                        zk.create(root, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                    }
+                } catch (KeeperException e) {
+                    System.out
+                            .println("Keeper exception when instantiating queue: "
+                                    + e.toString());
+                } catch (InterruptedException e) {
+                    System.out.println("Interrupted exception");
+                }
+            }
+    	}
+    	
+    	void leaderProcess() throws KeeperException, InterruptedException {
+    		String queuePathName = "/Queue";
+    		String servicePathName = "/Service";
+    		Stat queueExist = zk.exists(queuePathName, false);
+    		if (queueExist == null) {
+    			zk.create(queuePathName, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+    		}
+    		Stat serviceExist = zk.exists(servicePathName, false);
+    		if (serviceExist == null) {
+    			zk.create(servicePathName, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+    		}
+    		
+    		while (true) {
+                synchronized (mutex) {
+                    List<String> list = zk.getChildren(queuePathName, true);
+                    if (list.size() == 0) {
+                        System.out.println("Waiting for requests!! zzzzZZZZ");
+                        mutex.wait();
+                    } else {                    	
+                        Integer min = Integer.valueOf(list.get(0).substring(8));
+                        System.out.println("List: "+list.toString());
+                        String minString = list.get(0);
+                        for(String s : list){
+                            Integer tempValue = Integer.valueOf(s.substring(8));
+                            //System.out.println("Temp value: " + tempValue);
+                            if(tempValue < min) { 
+                            	min = tempValue;
+                            	minString = s;
+                            }
+                        }
+                        System.out.println("Processing "+ minString);
+                        //recuperando a informação do znode "min" de Queue:
+                        byte[] dataB = zk.getData(queuePathName+"/"+minString, false, null);
+                        // Converte os bytes de volta para String
+                        String dataS = new String(dataB, StandardCharsets.UTF_8);
+                        // Divide a string original de volta em um array de strings:
+                        String[] data = dataS.split(";");
+                        if(data[0].equals("reg")) {
+                        	String pathName;                   		 
+                    		byte[] ip = data[2].getBytes(StandardCharsets.UTF_8);
+                    		pathName = zk.create(servicePathName + "/" + data[1], ip, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                    		new Thread().sleep(5000);
+                    		System.out.println("Done!");
+                    		String message = "done!";
+                    		byte[] messageB = message.getBytes(StandardCharsets.UTF_8);
+                    		zk.setData(data[3],messageB, -1);
+                    		
+                        } else {
+                        	List<String> list_2 = zk.getChildren(servicePathName, false);
+                        	boolean found = false;
+                            for(String s : list_2){
+                            	if(s.contains(data[1]))  {                            		
+                            		byte[] messageB = zk.getData(servicePathName +"/"+s, false, null);
+                            		new Thread().sleep(3000);
+                            		System.out.println("Done!");
+                            		new Thread().sleep(1000);
+                            		
+                            		zk.setData(data[2],messageB, -1);
+                            		found = true;
+                            		break;
+                            		
+                            	}
+                            }
+                            if(!found) {
+                            	String message = "Not Found!";
+                            	byte[] messageB = message.getBytes(StandardCharsets.UTF_8);
+                            	new Thread().sleep(5000);
+                        		zk.setData(data[2],messageB, -1);
+                            }
+                                                		
+                        	
+                        }
+                    	zk.delete(queuePathName +"/"+ minString, 0);
+                    	new Thread().sleep(5000);
+                    }
+                }
+            }
+    	}
+    	
+    	
+    	
+    	      	
+    	
+    }
+    
+    
+    
+    
+    
     static public class dnsResolver extends SyncPrimitive {
     	
     	/*construtor - Cria um Znode "/Dns" na raiz caso não exista*/
@@ -407,7 +520,7 @@ E só então continue. */
     		if (exist == null) {
     			zk.create(queuePathName, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
     		}
-    		String[] req = {"reg",servName,ip};
+    		String[] req = {"reg",servName,ip,pathName};
     		//juntando strings de req numa só e usando separados ";"
     		String reqJoin = String.join(";",req);
     		//encapsulando reqJoin em bytes armazenar no znode:
@@ -417,7 +530,7 @@ E só então continue. */
             System.out.println("I'm waiting for my request to be processed");
             latch.await();
             System.out.println("Is Done!! Closing...");
-            new Thread().sleep(5000);
+            new Thread().sleep(1000);
             return true;
     	}
     	
@@ -433,7 +546,7 @@ E só então continue. */
     		if (exist == null) {
     			zk.create(queuePathName, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
     		}
-    		String[] req = {"res",service};
+    		String[] req = {"res",service,pathName};
     		//juntando strings de req numa só e usando separados ";"
     		String reqJoin = String.join(";",req);
     		//encapsulando reqJoin em bytes armazenar no znode:
@@ -442,22 +555,10 @@ E só então continue. */
     		System.out.println("My path name is: "+pathName);
             System.out.println("I'm waiting for my request to be processed");
             latch.await();
-            System.out.println("Is Done!! Closing...");
+            System.out.println("Is Done!!");
             byte[] data_2 = zk.getData(pathName, false, null);
             String res = new String(data_2, StandardCharsets.UTF_8);
-            //new Thread().sleep(5000);
             return res;
-//            List<String> list = zk.getChildren(root, false);
-//            for(String s : list){
-//            	if(s.contains(service))  {
-//            		byte[] data_2 = zk.getData(root +"/"+s, false, null);
-//                    String res = new String(data_2);
-//                    zk.exists(root +"/"+s, this);
-//                    return res;
-//            		
-//            	}
-//            }
-            //return "Not found!";
     	}
     	
     	synchronized public void process(WatchedEvent event) {
@@ -465,20 +566,10 @@ E só então continue. */
             try {
             	String path = event.getPath();
             	if (event.getType() == Event.EventType.NodeDataChanged) {
-            		latch.countDown();
-//            		byte[] data_2 = zk.getData(path, true, null);
-//                    String res = new String(data_2);  
-//                    System.out.println("Ip de "+path.substring(5)+" alterado!");
-//                    System.out.println("Novo Ip de "+path.substring(5)+":");
-//                    System.out.println(res);			
+            		latch.countDown();			
 			    } 
             	else if(event.getType() == Event.EventType.NodeDeleted) {
             		latch.countDown();
-//			    	System.out.println("O endereço de Ip de "+path.substring(5)+" não esta mais disponivel!");
-//			    	System.out.println("Buscando um novo endereço para "+path.substring(5));
-//			    	String newIP = resolverService(path.substring(5));
-//			    	System.out.println("Resolucao de "+path.substring(5) +":");
-//	                System.out.println(newIP);
 			    }
 			} catch (Exception e) {e.printStackTrace();}
             	
@@ -497,6 +588,8 @@ E só então continue. */
         	lockTest(args);
         else if(args[0].equals("dns"))
         	dnsTest(args);
+        else if(args[0].equals("leader"))
+        	leaderTest(args);
         else
         	System.err.println("Unkonw option");
     }
@@ -600,7 +693,7 @@ Chama leave() e espera todos os processos saírem da barreira*/
              try{
             	 boolean regis = s.registerService(args[3],args[4]);
             	 System.out.println("Serviço "+args[3]+" registrado!");
-            	 while(true);
+            	 //while(true);
              } catch (KeeperException e){
              	e.printStackTrace();
              } catch (InterruptedException e){
@@ -612,7 +705,8 @@ Chama leave() e espera todos os processos saírem da barreira*/
                  String res = s.resolverService(args[3]);
                  System.out.println("Resolucao de "+args[3] +":");
                  System.out.println(res);
-                 while(true);
+                 new Thread().sleep(2000);
+                 //while(true);
                  //new Thread().sleep(10000);
                  
              } catch (KeeperException e){
@@ -622,7 +716,18 @@ Chama leave() e espera todos os processos saírem da barreira*/
              }
              
          } 
-    }       
+    }
+    
+    public static void leaderTest(String args[]) {
+    	Leader leader = new Leader(args[1],"/Leader");
+        try{
+        	leader.leaderProcess(); 
+        } catch (KeeperException e){
+        	e.printStackTrace();
+        } catch (InterruptedException e){
+        	e.printStackTrace();
+        }
+    }
     
 }
 

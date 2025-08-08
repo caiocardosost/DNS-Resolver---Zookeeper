@@ -408,13 +408,18 @@ E só então continue. */
     		if (serviceExist == null) {
     			zk.create(servicePathName, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
     		}
-    		System.out.println("Esperando requisições!! zzzzZZZZ");
+    		System.out.println("Pronto para processar requisições!!");
     		while (true) {
                 synchronized (mutex) {
                     List<String> list = zk.getChildren(queuePathName, true);
                     if (list.size() == 0) {
                         //dormindo se não existem requisições
-                        mutex.wait();
+                    	System.out.println("Esperando novas requisições!! zzzzZZZZ");
+                    	while(list.size()==0) {
+                    		mutex.wait();
+                    		list = zk.getChildren(queuePathName, true);
+                    	}
+                        
                     } else {
                     	System.out.println("Novas Requisições Disponiveis!");
                     	System.out.println("Fila de requisições: ");
@@ -472,8 +477,7 @@ E só então continue. */
                                                 		
                         	
                         }
-                    	zk.delete(queuePathName +"/"+ minString, 0);
-                    	System.out.println("Esperando novas requisições!! zzzzZZZZ");
+                    	zk.delete(queuePathName +"/"+ minString, 0);                    	
                     	new Thread().sleep(5000);
                     }
                 }
@@ -514,9 +518,10 @@ E só então continue. */
     		Stat s = zk.exists("/Leader", false);    		
     		while (true) {
                 synchronized (mutex) {
-                    List<String> list = zk.getChildren(root, true);
+                    List<String> list = zk.getChildren(root, false);
                     if (list.size() <3 && s == null) {
                         System.out.println("Barreira: Aguardando um numero minimo de candidatos zzzzZZZZ");
+                        zk.getChildren(root, true);
                         mutex.wait();
                         new Thread().sleep(1000);
                     } else {

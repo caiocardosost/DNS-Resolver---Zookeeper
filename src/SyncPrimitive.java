@@ -88,15 +88,16 @@ public class SyncPrimitive implements Watcher {
             }
         }
         
-        boolean lock() throws KeeperException, InterruptedException{
+        String lock() throws KeeperException, InterruptedException{
             //Step 1
             pathName = zk.create(root + "/lock-", new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
             System.out.println("Meu path name é: "+pathName);
             //Steps 2 to 5
-            return testMin();
+            testMin();
+            return pathName;
         }
         
-	boolean testMin() throws KeeperException, InterruptedException{
+	void testMin() throws KeeperException, InterruptedException{
 	    while (true) {
 		 Integer suffix = Integer.valueOf(pathName.substring(12));
 	         //Step 2 
@@ -115,8 +116,8 @@ public class SyncPrimitive implements Watcher {
                 System.out.println("Suffix: "+suffix+", min: "+min);
            	//Step 3
              	if (suffix.equals(min)) {
-            		System.out.println("Lock adquirido por "+minString+"!");
-            		return true;
+            		System.out.println("Lock adquirido!");
+            		return;
             	}
             	//Step 4
             	//Wait for the removal of the next lowest sequence number
@@ -131,45 +132,17 @@ public class SyncPrimitive implements Watcher {
             		}
             	}
             	//Exists with watch
-            	Stat s = zk.exists(root+"/"+maxString, this);
-            	System.out.println("Vigiando "+root+"/"+maxString);
-            	//Step 5
-            	if (s != null) {
-            	    //Wait for notification
-            	    break;  
+            	synchronized (mutex) {
+	            	zk.exists(root+"/"+maxString, true);
+	            	System.out.println("Não consegui o Lock!");
+	            	System.out.println("Vigiando o portador atual: "+root+"/"+maxString);
+	            	mutex.wait();
+	            	System.out.println("Recebi a notificação - Vou tentar obter o Lock!");
             	}
-	    }
-            System.out.println(pathName+" Está aguardando notificações!");
-	    return false;
-	}
+            	
+	    	}
+		}
 
-        synchronized public void process(WatchedEvent event) {
-            synchronized (mutex) {
-            	String path = event.getPath();
-            	if (event.getType() == Event.EventType.NodeDeleted) {
-            		System.out.println("Notificação de "+path);
-			try {
-			    if (testMin()) { //Step 5 (cont.) -> go to step 2 to check
-				this.compute();
-			    } else {
-				System.out.println("Não tenho o menor ID! Aguardando novas notificações.");
-			    }
-			} catch (Exception e) {e.printStackTrace();}
-            	}
-            }
-        }
-        
-        void compute() {
-        	System.out.println("Lock adquirido!");
-    		try {
-				new Thread().sleep(wait);
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-    		//Exits, which releases the ephemeral node (Unlock operation)
-    		System.out.println("Lock liberado!");
-    		System.exit(0);
-        }
     }
     
     static public class Log extends SyncPrimitive {    	    	
@@ -196,15 +169,20 @@ public class SyncPrimitive implements Watcher {
     	}
     	
     	/*Produz um log do sistema*/
-    	void logGenerator() throws KeeperException, InterruptedException {
+    	void logGenerator(String[] args) throws KeeperException, InterruptedException {
     		String pathName;
     		String servLog;
     		String servicePathName = "/Service";    		
     		pathName = zk.create(root + "/" + "Log-", new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+    		Lock serviceLock = new Lock(args[1],"/Lock",10000);
+    		System.out.println("Região critica --- Tentando obter o Lock...");
+    		String lockPathName = serviceLock.lock();
+    		System.out.println("Processanto...");
     		Stat exist = zk.exists(servicePathName, false);
     		if (exist == null) {
     			zk.create(servicePathName, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
     		}
+    		
     		List<String> list = zk.getChildren(servicePathName, false);
         	if(list.size() == 0) {
         		servLog = "Não há serviços registrados!";        		
@@ -216,7 +194,11 @@ public class SyncPrimitive implements Watcher {
             		}
         		sb.setLength(sb.length() - 2);
         		servLog = sb.toString();        		
-        		}
+        	}
+        	new Thread().sleep(5000);
+        	System.out.println("Lock liberado!");
+        	zk.delete(lockPathName, 0); 
+        	
         	byte[] data = servLog.getBytes(StandardCharsets.UTF_8);
             zk.setData(pathName, data, -1);
             System.out.println("Serviços registrados:");
@@ -248,7 +230,7 @@ public class SyncPrimitive implements Watcher {
             }
     	}
     	
-    	void leaderProcess() throws KeeperException, InterruptedException {
+    	void leaderProcess(String[] args) throws KeeperException, InterruptedException {
     		String queuePathName = "/Queue";
     		String servicePathName = "/Service";
     		Stat queueExist = zk.exists(queuePathName, false);
@@ -293,13 +275,20 @@ public class SyncPrimitive implements Watcher {
                         String[] data = dataS.split(";");
                         if(data[0].equals("reg")) {
                         	String pathName;
+                        	Lock serviceLock = new Lock(args[1],"/Lock",10000);
+                        	System.out.println("Região critica --- Tentando obter o Lock...");
+                    		String lockPathName = serviceLock.lock();
                         	Stat regExist = zk.exists(servicePathName+"/"+data[1], false);
                     		if (regExist == null) {
                     			byte[] ip = data[2].getBytes(StandardCharsets.UTF_8);
                     			pathName = zk.create(servicePathName + "/" + data[1], ip, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
                     		} 
                     		new Thread().sleep(5000);
-                    		System.out.println("Concluido!");
+                    		System.out.println("Processando...");
+                    		System.out.println("Lock liberado!");
+                    		System.out.println("Processamento Concluido!");
+                        	zk.delete(lockPathName, 0);
+                    		
                     		String message = "done!";
                     		byte[] messageB = message.getBytes(StandardCharsets.UTF_8);
                     		zk.setData(data[3],messageB, -1);
@@ -311,7 +300,7 @@ public class SyncPrimitive implements Watcher {
                             	if(s.contains(data[1]))  {                            		
                             		byte[] messageB = zk.getData(servicePathName +"/"+s, false, null);
                             		new Thread().sleep(3000);
-                            		System.out.println("Concluido!");
+                            		System.out.println("Processamento Concluido!");
                             		new Thread().sleep(1000);
                             		
                             		zk.setData(data[2],messageB, -1);
@@ -561,23 +550,7 @@ public class SyncPrimitive implements Watcher {
 
     
     
-    public static void lockTest(String args[]) {
-    	Lock lock = new Lock(args[1],"/lock",Long.valueOf(args[2]));
-        try{
-        	boolean success = lock.lock();
-        	if (success) {
-        		lock.compute();
-        	} else {
-        		while(true) {
-        			//Waiting for a notification
-        		}
-            }         
-        } catch (KeeperException e){
-        	e.printStackTrace();
-        } catch (InterruptedException e){
-        	e.printStackTrace();
-        }
-    }
+   
     
     public static void dnsTest(String args[]) {
     	    		
@@ -615,7 +588,7 @@ public class SyncPrimitive implements Watcher {
     public static void leaderTest(String args[]) {
     	Leader leader = new Leader(args[1],"/Leader");
         try{
-        	leader.leaderProcess(); 
+        	leader.leaderProcess(args); 
         } catch (KeeperException e){
         	e.printStackTrace();
         } catch (InterruptedException e){
@@ -648,7 +621,7 @@ public class SyncPrimitive implements Watcher {
     	
         try{
         	System.out.println("---Log de registros---");
-        	logger.logGenerator();
+        	logger.logGenerator(args);
         } catch (KeeperException e){
         	e.printStackTrace();
         } catch (InterruptedException e){

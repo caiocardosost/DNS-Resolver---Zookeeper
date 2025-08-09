@@ -337,6 +337,18 @@ public class SyncPrimitive implements Watcher {
     	
     	/*Realiza a eleição:*/    	
     	Integer makeElection(String pathName) throws KeeperException, InterruptedException {
+    		//se o lider ja existe, esperar nova eleição
+    		Stat condIni = zk.exists("/Leader", false);
+    		if( condIni != null) {
+    			synchronized (mutex) {
+	    			zk.exists("/Leader", true);
+	            	System.out.println("Dormindo até a proxima eleição!! zzzzzZZZ");            	
+	            	mutex.wait();
+	            	System.out.println("Acordei, Hora da eleição!");
+	            	return 10000;
+    			}
+    			
+    		}
     		List<String> list = zk.getChildren(root, false);              	 
             System.out.println("Realizando eleição - Candidatos: ");
             System.out.println("List: "+list.toString());
@@ -430,7 +442,7 @@ public class SyncPrimitive implements Watcher {
     		String reqJoin = String.join(";",req);
     		//encapsulando reqJoin em bytes armazenar no znode:
     		byte[] data = reqJoin.getBytes(StandardCharsets.UTF_8);
-    		zk.create(queuePathName+ "/" + "Request-", data, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);    		
+    		zk.create(queuePathName+ "/" + "Request-", data, Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);    		
             System.out.println("Meu path name é: "+pathName);
             System.out.println("Aguardando o processamento da minha requisição...");
             latch.await();
@@ -456,7 +468,7 @@ public class SyncPrimitive implements Watcher {
     		String reqJoin = String.join(";",req);
     		//encapsulando reqJoin em bytes armazenar no znode:
     		byte[] data = reqJoin.getBytes(StandardCharsets.UTF_8);
-    		zk.create(queuePathName+ "/" + "Request-", data, Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+    		zk.create(queuePathName+ "/" + "Request-", data, Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
     		System.out.println("Meu path name é: "+pathName);
             System.out.println("Aguardando o processamento da minha requisição...");
             latch.await();

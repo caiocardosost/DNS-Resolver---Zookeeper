@@ -172,6 +172,58 @@ public class SyncPrimitive implements Watcher {
         }
     }
     
+    static public class Log extends SyncPrimitive {    	    	
+    	/*construtor - Cria um Znode "/Dns" na raiz caso não exista*/
+    	
+    	Log(String address, String root){
+    		super(address);
+            this.root = root;
+            
+            if (zk != null) {
+                try {
+                    Stat s = zk.exists(root, false);
+                    if (s == null) {
+                        zk.create(root, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+                    }
+                } catch (KeeperException e) {
+                    System.out
+                            .println("Keeper exception when instantiating queue: "
+                                    + e.toString());
+                } catch (InterruptedException e) {
+                    System.out.println("Interrupted exception");
+                }
+            }
+    	}
+    	
+    	/*Produz um log do sistema*/
+    	void logGenerator() throws KeeperException, InterruptedException {
+    		String pathName;
+    		String servLog;
+    		String servicePathName = "/Service";    		
+    		pathName = zk.create(root + "/" + "Log-", new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT_SEQUENTIAL);
+    		Stat exist = zk.exists(servicePathName, false);
+    		if (exist == null) {
+    			zk.create(servicePathName, new byte[0], Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+    		}
+    		List<String> list = zk.getChildren(servicePathName, false);
+        	if(list.size() == 0) {
+        		servLog = "Não há serviços registrados!";        		
+        	} else {
+        		StringBuilder sb = new StringBuilder();
+        		for(String s : list){
+        			sb.append(s);
+                    sb.append(", ");
+            		}
+        		sb.setLength(sb.length() - 2);
+        		servLog = sb.toString();        		
+        		}
+        	byte[] data = servLog.getBytes(StandardCharsets.UTF_8);
+            zk.setData(pathName, data, -1);
+            System.out.println("Serviços registrados:");
+            System.out.println(servLog);
+        }
+    }
+    
     static public class Leader extends SyncPrimitive {
     	
     	/*construtor - Cria um Znode "/Dns" na raiz caso não exista*/
@@ -501,6 +553,8 @@ public class SyncPrimitive implements Watcher {
         	dnsTest(args);
         else if(args[0].equals("election"))
         	electionTest(args);
+        else if(args[0].equals("log"))
+        	logTest(args);
         else
         	System.err.println("Unkonw option");
     }
@@ -581,6 +635,20 @@ public class SyncPrimitive implements Watcher {
         	}
         	
         	
+        } catch (KeeperException e){
+        	e.printStackTrace();
+        } catch (InterruptedException e){
+        	e.printStackTrace();
+        }
+    }
+    
+    public static void logTest(String args[]) {
+    	
+    	Log logger = new Log(args[1],"/Log");
+    	
+        try{
+        	System.out.println("---Log de registros---");
+        	logger.logGenerator();
         } catch (KeeperException e){
         	e.printStackTrace();
         } catch (InterruptedException e){

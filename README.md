@@ -4,7 +4,7 @@ Projeto proposto na disciplina "Sistemas distribuidos" da UFABC
 
 ## Funcionamento
 
-Basicamente o projeto consiste num resolvedor de nomes centralizado. O sistema possui 3 agentes participantes:
+Basicamente o projeto consiste num resolvedor de nomes centrado no zkServe que serve como uma espécie de repositório centralizado de dados. O sistema como foi projetado, possui 4 agentes participantes:
 - ZkServer: Mecanismo central para comunicação entre os processos e armazenamento de dados
 - Servidores coordenadores ou lideres: Servidores que irão processar alguma requisição (apenas um ativo por vez, escolhido por eleição)
 - Servidores requisitores ou Clientes: Servidores que consultam ou registram algum serviço.
@@ -47,5 +47,6 @@ Desta forma, o procedimento de execução é o seguinte:
 - Iniciar o arquivo `run_candLeader.bat` em 3 terminais para assim existir 3 candidatos a líder e prosseguir com a eleição
 - Iniciar `run_regServ` ou `run_resServ` para realizar as requisições.
 - Iniciar `run_servLog.bat` a qualquer momento para obter um registro dos servidores cadastrados.
+
 
 
